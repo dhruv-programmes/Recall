@@ -3,7 +3,7 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
-  serverExternalPackages: ["sarvamai"],
+  serverExternalPackages: ["sarvamai", "ffmpeg-static"],
   experimental: {
     serverActions: {
       bodySizeLimit: "200mb",

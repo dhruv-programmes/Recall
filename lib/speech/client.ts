@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { SarvamAIClient } from "sarvamai";
 import { sarvamApiKey } from "@/lib/env";
+import { SLICE_SECONDS } from "@/lib/speech/slices";
 
 export type SpeechSegment = {
   start: number;
@@ -11,6 +12,12 @@ export type SpeechSegment = {
   avg_logprob: number | null;
   no_speech_prob: number | null;
   speaker_label: string | null;
+};
+
+export type SpeechSlice = {
+  index: number;
+  segments: SpeechSegment[];
+  language: string | null;
 };
 
 export type SpeechJob = {
@@ -23,6 +30,9 @@ export type SpeechJob = {
   duration: number | null;
   diarization_note: string | null;
   segments: SpeechSegment[];
+  slices: SpeechSlice[];
+  incomplete: boolean;
+  credit: boolean;
   error: string | null;
 };
 
@@ -106,6 +116,10 @@ function segmentsFromTranscript(body: SarvamTranscript): SpeechSegment[] {
     .filter((segment) => segment.text && Number.isFinite(segment.start) && Number.isFinite(segment.end));
 }
 
+export function isCreditError(message: string | null | undefined) {
+  return /insufficient[_\s-]?quota|\bcredits?\b|\bquota\b|billing/i.test(message ?? "");
+}
+
 function blankJob(id: string, status: SpeechJob["status"], phase: SpeechJob["phase"]): SpeechJob {
   return {
     id,
@@ -117,8 +131,28 @@ function blankJob(id: string, status: SpeechJob["status"], phase: SpeechJob["pha
     duration: null,
     diarization_note: null,
     segments: [],
+    slices: [],
+    incomplete: status === "failed",
+    credit: false,
     error: null,
   };
+}
+
+function sliceIndex(fileName: string) {
+  const match = /^(\d{3})\./.exec(path.basename(fileName));
+  return match ? Number(match[1]) : 0;
+}
+
+function placeSlice(index: number, segments: SpeechSegment[], multiple: boolean): SpeechSegment[] {
+  const scoped = multiple || index > 0;
+  const shift = scoped ? index * SLICE_SECONDS : 0;
+  return segments.map((segment) => ({
+    ...segment,
+    start: segment.start + shift,
+    end: segment.end + shift,
+    speaker_label:
+      scoped && segment.speaker_label ? `s${index}:${segment.speaker_label}` : segment.speaker_label,
+  }));
 }
 
 export function speechHealth() {
@@ -134,7 +168,8 @@ export function speechHealth() {
   };
 }
 
-export async function startSpeechJob(audioPath: string) {
+export async function startSpeechJob(audioPaths: string[]) {
+  if (audioPaths.length === 0) throw new Error("There is no audio left to transcribe.");
   const client = sarvamClient();
   const job = await client.speechToTextJob.createJob({
     model: "saaras:v4",
@@ -143,7 +178,7 @@ export async function startSpeechJob(audioPath: string) {
     withDiarization: true,
     withTimestamps: true,
   });
-  const uploaded = await job.uploadFiles([audioPath], 300);
+  const uploaded = await job.uploadFiles(audioPaths, 300);
   if (!uploaded) {
     throw new Error("Sarvam did not accept the audio upload.");
   }
@@ -164,53 +199,66 @@ export async function fetchSpeechJob(jobId: string): Promise<SpeechJob> {
   }
 
   const state = status.job_state;
-  if (state === "Failed") {
-    const failed = blankJob(jobId, "failed", "transcribing");
-    failed.error = status.error_message || "Sarvam transcription failed";
-    return failed;
-  }
-  if (state !== "Completed") {
-    return blankJob(
+  if (state !== "Completed" && state !== "Failed") {
+    const running = blankJob(
       jobId,
       state === "Running" ? "running" : "queued",
       state === "Running" ? "transcribing" : "queued",
     );
+    const done = status.successful_files_count ?? 0;
+    const total = status.total_files ?? 0;
+    running.progress = total > 0 ? done / total : running.progress;
+    return running;
   }
 
   const results = await job.getFileResults();
-  if (results.successful.length === 0) {
-    const failed = blankJob(jobId, "failed", "transcribing");
-    failed.error = results.failed[0]?.error_message || status.error_message || "Sarvam transcription failed";
-    return failed;
-  }
-
+  const multiple = results.successful.length + results.failed.length > 1;
   const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), "sarvam-"));
-  let body: SarvamTranscript;
+  const byIndex = new Map<number, SpeechSlice>();
   try {
-    await job.downloadOutputs(outputDir);
-    const outputName = fs.readdirSync(outputDir).find((name) => name.endsWith(".json"));
-    if (!outputName) {
-      const failed = blankJob(jobId, "failed", "transcribing");
-      failed.error = "Sarvam finished without a transcript file.";
-      return failed;
+    if (results.successful.length > 0) {
+      await job.downloadOutputs(outputDir);
+      for (const file of results.successful) {
+        const outputName = `${path.basename(file.file_name)}.json`;
+        const outputPath = path.join(outputDir, outputName);
+        if (!fs.existsSync(outputPath)) continue;
+        const body = JSON.parse(fs.readFileSync(outputPath, "utf8")) as SarvamTranscript;
+        const index = sliceIndex(file.file_name);
+        const segments = placeSlice(index, segmentsFromTranscript(body), multiple || index > 0);
+        byIndex.set(index, { index, segments, language: body.language_code ?? null });
+      }
     }
-    body = JSON.parse(fs.readFileSync(path.join(outputDir, outputName), "utf8")) as SarvamTranscript;
   } finally {
     fs.rmSync(outputDir, { recursive: true, force: true });
   }
-  const segments = segmentsFromTranscript(body);
+
+  const indexes = [...results.successful, ...results.failed].map((file) => sliceIndex(file.file_name));
+  const start = indexes.length > 0 ? Math.min(...indexes) : 0;
+  const slices: SpeechSlice[] = [];
+  let cursor = start;
+  while (byIndex.has(cursor)) {
+    slices.push(byIndex.get(cursor)!);
+    cursor += 1;
+  }
+  const failed = results.failed.find((file) => sliceIndex(file.file_name) === cursor);
+  const error = failed?.error_message || status.error_message || null;
+  const segments = slices.flatMap((slice) => slice.segments);
   const duration = segments.reduce((max, segment) => Math.max(max, segment.end), 0);
-  const completed: SpeechJob = {
+  const incomplete = results.failed.length > 0 || slices.length === 0;
+  const finished: SpeechJob = {
     id: jobId,
-    status: "completed",
+    status: slices.length > 0 ? "completed" : "failed",
     phase: "completed",
-    progress: 1,
+    progress: incomplete ? slices.length / Math.max(1, results.successful.length + results.failed.length) : 1,
     processed_seconds: duration || null,
-    language: body.language_code ?? null,
+    language: slices.find((slice) => slice.language)?.language ?? null,
     duration: duration || null,
     diarization_note: speakerNote(segments.map((segment) => segment.speaker_label)),
     segments,
-    error: null,
+    slices,
+    incomplete,
+    credit: isCreditError(error),
+    error: slices.length > 0 && !incomplete ? null : error || "Sarvam transcription failed",
   };
-  return completed;
+  return finished;
 }

@@ -1,6 +1,14 @@
 import type { MeetingProgress, ProgressPhase } from "@/lib/types";
 import type { SpeechJob } from "@/lib/speech/client";
 
+export type SpeechCursor = {
+  nextSlice: number;
+  sliceCount: number;
+  sliceSeconds: number;
+  batchSize: number;
+  append: boolean;
+};
+
 function numberOrNull(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
@@ -31,6 +39,20 @@ export function speechProgress(value: unknown): MeetingProgress | null {
     ratio: clampRatio(numberOrNull(job.ratio)),
     processedSeconds: numberOrNull(job.processedSeconds),
     durationSeconds: numberOrNull(job.durationSeconds),
+  };
+}
+
+export function speechCursor(value: unknown): SpeechCursor {
+  const cursor =
+    value && typeof value === "object"
+      ? (value as Partial<Record<keyof SpeechCursor, unknown>>)
+      : {};
+  return {
+    nextSlice: typeof cursor.nextSlice === "number" ? cursor.nextSlice : 0,
+    sliceCount: typeof cursor.sliceCount === "number" ? cursor.sliceCount : 0,
+    sliceSeconds: typeof cursor.sliceSeconds === "number" ? cursor.sliceSeconds : 600,
+    batchSize: typeof cursor.batchSize === "number" ? cursor.batchSize : 1,
+    append: cursor.append === true,
   };
 }
 

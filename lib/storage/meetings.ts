@@ -15,7 +15,8 @@ import type {
   Segment,
   Speaker,
 } from "@/lib/types";
-import { speechProgress } from "@/lib/speech/progress";
+import { formatTimestamp } from "@/lib/format";
+import { speechCursor, speechProgress, type SpeechCursor } from "@/lib/speech/progress";
 
 const AUDIO_BUCKET = "meeting-audio";
 
@@ -37,6 +38,7 @@ type MeetingRow = {
   diarization_note: string | null;
   notes_status: NotesStatus;
   notes_error: string | null;
+  notes_progress: unknown;
 };
 
 function fail(error: { message: string } | null) {
@@ -89,7 +91,7 @@ function mapMeeting(row: MeetingRow): Meeting {
 }
 
 const meetingColumns =
-  "id, title, created_at, started_at, ended_at, duration_ms, status, audio_path, audio_mime, language, speech_job_id, speech_progress, error, source, diarization_note, notes_status, notes_error";
+  "id, title, created_at, started_at, ended_at, duration_ms, status, audio_path, audio_mime, language, speech_job_id, speech_progress, error, source, diarization_note, notes_status, notes_error, notes_progress";
 
 async function meetingRow(supabase: SupabaseClient, id: string) {
   const { data, error } = await supabase
@@ -166,6 +168,14 @@ export async function getSpeechJobId(supabase: SupabaseClient, id: string) {
   return (await meetingRow(supabase, id))?.speech_job_id ?? null;
 }
 
+export async function getSpeechCursor(supabase: SupabaseClient, id: string) {
+  return speechCursor((await meetingRow(supabase, id))?.speech_progress);
+}
+
+export async function getNotesProgress(supabase: SupabaseClient, id: string) {
+  return (await meetingRow(supabase, id))?.notes_progress ?? null;
+}
+
 export async function createMeeting(
   supabase: SupabaseClient,
   userId: string,
@@ -207,7 +217,8 @@ export async function updateMeeting(
     diarizationNote: string | null;
     notesStatus: NotesStatus;
     notesError: string | null;
-    speechProgress: MeetingProgress | null;
+    notesProgress: unknown;
+    speechProgress: (MeetingProgress & Partial<SpeechCursor>) | null;
   }>,
 ) {
   const current = await meetingRow(supabase, id);
@@ -232,6 +243,8 @@ export async function updateMeeting(
           : patch.diarizationNote,
       notes_status: patch.notesStatus ?? current.notes_status,
       notes_error: patch.notesError === undefined ? current.notes_error : patch.notesError,
+      notes_progress:
+        patch.notesProgress === undefined ? current.notes_progress : patch.notesProgress,
     })
     .eq("id", id)
     .eq("user_id", userId);
@@ -333,6 +346,60 @@ export async function replaceTranscript(
   fail(error);
 }
 
+export async function appendTranscript(
+  supabase: SupabaseClient,
+  meetingId: string,
+  input: {
+    language: string | null;
+    durationMs: number | null;
+    diarizationNote: string | null;
+    segments: Array<{
+      startMs: number;
+      endMs: number;
+      text: string;
+      speakerLabel: string | null;
+      avgLogprob: number | null;
+      noSpeechProb: number | null;
+    }>;
+  },
+) {
+  const labels = input.segments.map((segment) => segment.speakerLabel);
+  const speakers = new Map<string, string>();
+  const speakerRows = [];
+  const segmentRows = [];
+  for (const segment of input.segments) {
+    const key = segment.speakerLabel ?? "";
+    let speakerId = speakers.get(key);
+    if (!speakerId) {
+      speakerId = crypto.randomUUID();
+      speakers.set(key, speakerId);
+      speakerRows.push({
+        id: speakerId,
+        display_name: displayNameFor(segment.speakerLabel, labels).slice(0, 80),
+        original_label: segment.speakerLabel,
+      });
+    }
+    segmentRows.push({
+      id: crypto.randomUUID(),
+      speaker_id: speakerId,
+      start_ms: segment.startMs,
+      end_ms: segment.endMs,
+      text: segment.text,
+      avg_logprob: segment.avgLogprob,
+      no_speech_prob: segment.noSpeechProb,
+    });
+  }
+  const { error } = await supabase.rpc("append_meeting_transcript", {
+    p_meeting_id: meetingId,
+    p_language: input.language,
+    p_duration_ms: input.durationMs,
+    p_diarization_note: input.diarizationNote,
+    p_speakers: speakerRows,
+    p_segments: segmentRows,
+  });
+  fail(error);
+}
+
 function speakerIndex(label: string | null) {
   const match = label ? /SPEAKER_(\d+)/i.exec(label) : null;
   return match ? Number(match[1]) : null;
@@ -340,10 +407,17 @@ function speakerIndex(label: string | null) {
 
 function displayNameFor(label: string | null, labels: Array<string | null>) {
   if (!label) return "Unknown";
-  const index = speakerIndex(label);
-  if (index == null) return label;
-  const zeroBased = labels.some((item) => speakerIndex(item) === 0);
-  return `Speaker ${zeroBased ? index + 1 : index}`;
+  const scoped = /^s(\d+):(.*)$/.exec(label);
+  const inner = scoped ? scoped[2] : label;
+  const index = speakerIndex(inner);
+  if (index == null) return inner || label;
+  const zeroBased = labels.some((item) => {
+    const nested = item ? /^s\d+:(.*)$/.exec(item) : null;
+    return speakerIndex(nested ? nested[1] : item) === 0;
+  });
+  const name = `Speaker ${zeroBased ? index + 1 : index}`;
+  if (!scoped) return name;
+  return `${name} · ${formatTimestamp(Number(scoped[1]) * 600 * 1000)}`;
 }
 
 export async function updateSegmentText(
@@ -425,6 +499,11 @@ export async function saveNotes(
   userId: string,
   meetingId: string,
   content: NotesContent,
+  options?: {
+    notesStatus?: NotesStatus;
+    notesError?: string | null;
+    notesProgress?: unknown;
+  },
 ) {
   const current = await getNotes(supabase, meetingId);
   if (!current) {
@@ -448,12 +527,11 @@ export async function saveNotes(
       .eq("user_id", userId);
     fail(error);
   }
-  const { error } = await supabase
-    .from("meetings")
-    .update({ notes_status: "ready", notes_error: null })
-    .eq("id", meetingId)
-    .eq("user_id", userId);
-  fail(error);
+  await updateMeeting(supabase, userId, meetingId, {
+    notesStatus: options?.notesStatus ?? "ready",
+    notesError: options?.notesError === undefined ? null : options.notesError,
+    ...(options && "notesProgress" in options ? { notesProgress: options.notesProgress } : {}),
+  });
   return getNotes(supabase, meetingId);
 }
 

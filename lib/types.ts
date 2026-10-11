@@ -1,4 +1,4 @@
-export type MeetingStatus = "queued" | "transcribing" | "ready" | "failed";
+export type MeetingStatus = "recording" | "queued" | "transcribing" | "ready" | "failed";
 export type ProgressPhase = "queued" | "loading" | "transcribing" | "diarizing" | "notes";
 
 export type MeetingProgress = {

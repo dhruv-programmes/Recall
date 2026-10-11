@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ApiError } from "@/lib/client";
+import { markOpenOnTranscript } from "@/lib/open-meeting-tab";
 import { saveAudioMeeting } from "@/lib/storage/save-audio";
 
 function supportedMime() {
@@ -134,7 +135,8 @@ export function RecordPanel() {
       });
       setStatus("idle");
       setTitle("");
-      router.push(`/meetings/${detail.meeting.id}`);
+      markOpenOnTranscript(detail.meeting.id);
+      router.push(`/meetings/${detail.meeting.id}?tab=transcript`);
       toast.success("Recording saved. Transcription is running.");
     } catch (caught) {
       setStatus("idle");

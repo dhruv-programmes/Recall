@@ -16,6 +16,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ApiError } from "@/lib/client";
+import { markOpenOnTranscript } from "@/lib/open-meeting-tab";
 import { saveAudioMeeting } from "@/lib/storage/save-audio";
 
 export function UploadDialog({
@@ -45,7 +46,8 @@ export function UploadDialog({
       setFile(null);
       setTitle("");
       onCreated?.(detail.meeting.id);
-      router.push(`/meetings/${detail.meeting.id}`);
+      markOpenOnTranscript(detail.meeting.id);
+      router.push(`/meetings/${detail.meeting.id}?tab=transcript`);
       toast.success("Audio saved. Transcription is running.");
     } catch (error) {
       toast.error(error instanceof ApiError ? error.message : "Upload failed.");

@@ -184,7 +184,7 @@ export function NotesPanel({
           Save notes
         </Button>
         <Button type="button" variant="outline" onClick={regenerate} disabled={busy}>
-          Write notes again
+          {detail.meeting.notesError ? "Continue notes" : "Write notes again"}
         </Button>
       </div>
     </div>

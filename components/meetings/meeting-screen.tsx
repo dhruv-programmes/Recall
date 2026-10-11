@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { ProcessingProgress } from "@/components/meetings/processing-progress";
 import { MeetingShell } from "@/components/meetings/shell";
@@ -21,6 +21,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ApiError, api } from "@/lib/client";
+import { takeOpenOnTranscript } from "@/lib/open-meeting-tab";
 import type { MeetingDetail } from "@/lib/types";
 
 function DiarizationNotice({
@@ -38,15 +39,37 @@ function DiarizationNotice({
   );
 }
 
-export function MeetingScreen({ meetingId }: { meetingId: string }) {
+export function MeetingScreen({
+  meetingId,
+  initialTab = "summary",
+}: {
+  meetingId: string;
+  initialTab?: "summary" | "transcript";
+}) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const requestedTab = searchParams.get("tab");
   const [detail, setDetail] = useState<MeetingDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState("summary");
+  const [tab, setTab] = useState<"summary" | "transcript" | "ask">(initialTab);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  useLayoutEffect(() => {
+    const fromUrl = new URLSearchParams(window.location.search).get("tab");
+    const fromRecording = takeOpenOnTranscript(meetingId);
+    if (fromRecording || fromUrl === "transcript" || requestedTab === "transcript") {
+      setTab("transcript");
+      return;
+    }
+    if (fromUrl === "ask" || requestedTab === "ask") {
+      setTab("ask");
+      return;
+    }
+    setTab("summary");
+  }, [meetingId, requestedTab]);
 
   const load = useCallback(async () => {
     try {
@@ -169,7 +192,7 @@ export function MeetingScreen({ meetingId }: { meetingId: string }) {
                   {detail.meeting.error}
                 </p>
                 <Button type="button" className="w-fit" onClick={retry}>
-                  Retry transcription
+                  {detail.meeting.status === "ready" ? "Continue transcription" : "Retry transcription"}
                 </Button>
               </div>
             ) : null}
