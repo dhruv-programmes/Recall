@@ -1,7 +1,8 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { SarvamAIClient } from "sarvamai";
-import { dataDir, sarvamApiKey } from "@/lib/env";
+import { sarvamApiKey } from "@/lib/env";
 
 export type SpeechSegment = {
   start: number;
@@ -25,8 +26,6 @@ export type SpeechJob = {
   error: string | null;
 };
 
-const JOB_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
-
 type SarvamTranscript = {
   language_code?: string | null;
   timestamps?: {
@@ -43,23 +42,6 @@ type SarvamTranscript = {
     }>;
   } | null;
 };
-
-function jobsDir() {
-  const dir = path.join(dataDir(), "speech-jobs");
-  fs.mkdirSync(dir, { recursive: true });
-  return dir;
-}
-
-function jobFile(jobId: string) {
-  if (!JOB_ID.test(jobId)) {
-    throw new Error("Invalid speech job id");
-  }
-  return path.join(jobsDir(), `${jobId}.json`);
-}
-
-function writeJob(job: SpeechJob) {
-  fs.writeFileSync(jobFile(job.id), JSON.stringify(job), "utf8");
-}
 
 function sarvamClient() {
   const apiSubscriptionKey = sarvamApiKey();
@@ -166,9 +148,7 @@ export async function startSpeechJob(audioPath: string) {
     throw new Error("Sarvam did not accept the audio upload.");
   }
   await job.start();
-  const record = blankJob(job.jobId, "queued", "queued");
-  writeJob(record);
-  return { id: job.jobId, status: "queued" };
+  return { id: job.jobId, status: "queued" as const };
 }
 
 export async function fetchSpeechJob(jobId: string): Promise<SpeechJob> {
@@ -180,7 +160,6 @@ export async function fetchSpeechJob(jobId: string): Promise<SpeechJob> {
   } catch (error) {
     const failed = blankJob(jobId, "failed", "transcribing");
     failed.error = errorMessage(error);
-    writeJob(failed);
     return failed;
   }
 
@@ -188,37 +167,37 @@ export async function fetchSpeechJob(jobId: string): Promise<SpeechJob> {
   if (state === "Failed") {
     const failed = blankJob(jobId, "failed", "transcribing");
     failed.error = status.error_message || "Sarvam transcription failed";
-    writeJob(failed);
     return failed;
   }
   if (state !== "Completed") {
-    const running = blankJob(
+    return blankJob(
       jobId,
       state === "Running" ? "running" : "queued",
       state === "Running" ? "transcribing" : "queued",
     );
-    writeJob(running);
-    return running;
   }
 
   const results = await job.getFileResults();
   if (results.successful.length === 0) {
     const failed = blankJob(jobId, "failed", "transcribing");
     failed.error = results.failed[0]?.error_message || status.error_message || "Sarvam transcription failed";
-    writeJob(failed);
     return failed;
   }
 
-  const outputDir = path.join(jobsDir(), `${jobId}-output`);
-  await job.downloadOutputs(outputDir);
-  const outputName = fs.readdirSync(outputDir).find((name) => name.endsWith(".json"));
-  if (!outputName) {
-    const failed = blankJob(jobId, "failed", "transcribing");
-    failed.error = "Sarvam finished without a transcript file.";
-    writeJob(failed);
-    return failed;
+  const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), "sarvam-"));
+  let body: SarvamTranscript;
+  try {
+    await job.downloadOutputs(outputDir);
+    const outputName = fs.readdirSync(outputDir).find((name) => name.endsWith(".json"));
+    if (!outputName) {
+      const failed = blankJob(jobId, "failed", "transcribing");
+      failed.error = "Sarvam finished without a transcript file.";
+      return failed;
+    }
+    body = JSON.parse(fs.readFileSync(path.join(outputDir, outputName), "utf8")) as SarvamTranscript;
+  } finally {
+    fs.rmSync(outputDir, { recursive: true, force: true });
   }
-  const body = JSON.parse(fs.readFileSync(path.join(outputDir, outputName), "utf8")) as SarvamTranscript;
   const segments = segmentsFromTranscript(body);
   const duration = segments.reduce((max, segment) => Math.max(max, segment.end), 0);
   const completed: SpeechJob = {
@@ -233,6 +212,5 @@ export async function fetchSpeechJob(jobId: string): Promise<SpeechJob> {
     segments,
     error: null,
   };
-  writeJob(completed);
   return completed;
 }

@@ -4,6 +4,8 @@ import { notesSchema } from "@/lib/schemas/notes";
 import { requireSession, unauthorized } from "@/lib/supabase/server";
 import { getMeeting, meetingDetail, saveNotes } from "@/lib/storage/meetings";
 
+export const maxDuration = 60;
+
 type Context = { params: Promise<{ id: string }> };
 
 export async function POST(_request: Request, context: Context) {

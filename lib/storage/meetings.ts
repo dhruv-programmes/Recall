@@ -15,7 +15,7 @@ import type {
   Segment,
   Speaker,
 } from "@/lib/types";
-import { readSpeechProgress } from "@/lib/speech/progress";
+import { speechProgress } from "@/lib/speech/progress";
 
 const AUDIO_BUCKET = "meeting-audio";
 
@@ -31,6 +31,7 @@ type MeetingRow = {
   audio_mime: string | null;
   language: string | null;
   speech_job_id: string | null;
+  speech_progress: unknown;
   error: string | null;
   source: MeetingSource;
   diarization_note: string | null;
@@ -56,7 +57,7 @@ function progressFor(row: MeetingRow): MeetingProgress | null {
   }
   if (row.status === "transcribing") {
     return (
-      readSpeechProgress(row.speech_job_id) ?? {
+      speechProgress(row.speech_progress) ?? {
         phase: "transcribing",
         ratio: null,
         processedSeconds: null,
@@ -88,7 +89,7 @@ function mapMeeting(row: MeetingRow): Meeting {
 }
 
 const meetingColumns =
-  "id, title, created_at, started_at, ended_at, duration_ms, status, audio_path, audio_mime, language, speech_job_id, error, source, diarization_note, notes_status, notes_error";
+  "id, title, created_at, started_at, ended_at, duration_ms, status, audio_path, audio_mime, language, speech_job_id, speech_progress, error, source, diarization_note, notes_status, notes_error";
 
 async function meetingRow(supabase: SupabaseClient, id: string) {
   const { data, error } = await supabase
@@ -206,6 +207,7 @@ export async function updateMeeting(
     diarizationNote: string | null;
     notesStatus: NotesStatus;
     notesError: string | null;
+    speechProgress: MeetingProgress | null;
   }>,
 ) {
   const current = await meetingRow(supabase, id);
@@ -221,6 +223,8 @@ export async function updateMeeting(
       language: patch.language === undefined ? current.language : patch.language,
       speech_job_id:
         patch.speechJobId === undefined ? current.speech_job_id : patch.speechJobId,
+      speech_progress:
+        patch.speechProgress === undefined ? current.speech_progress : patch.speechProgress,
       error: patch.error === undefined ? current.error : patch.error,
       diarization_note:
         patch.diarizationNote === undefined

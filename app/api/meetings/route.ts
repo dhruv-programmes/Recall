@@ -1,5 +1,4 @@
 import { connection } from "next/server";
-import { maxUploadBytes } from "@/lib/env";
 import { beginTranscription } from "@/lib/speech/sync";
 import { requireSession, unauthorized } from "@/lib/supabase/server";
 import {
@@ -8,10 +7,21 @@ import {
   updateMeeting,
   meetingDetail,
   meetingAudioObjectPath,
-  uploadMeetingAudio,
 } from "@/lib/storage/meetings";
-import { extensionForUpload } from "@/lib/storage/paths";
 import path from "node:path";
+
+export const maxDuration = 60;
+
+const AUDIO_EXTENSIONS = new Set([
+  ".mp3",
+  ".wav",
+  ".m4a",
+  ".mp4",
+  ".webm",
+  ".ogg",
+  ".flac",
+  ".aac",
+]);
 
 export async function GET(request: Request) {
   await connection();
@@ -26,45 +36,28 @@ export async function POST(request: Request) {
   await connection();
   const session = await requireSession();
   if (!session) return unauthorized();
-  const form = await request.formData();
-  const file = form.get("file");
-  if (!(file instanceof File)) {
-    return Response.json({ error: "Choose an audio file." }, { status: 400 });
+  const body = (await request.json().catch(() => null)) as {
+    id?: string;
+    title?: string;
+    source?: string;
+    audioPath?: string;
+    audioMime?: string;
+  } | null;
+  const id = body?.id ?? "";
+  const audioPath = body?.audioPath ?? "";
+  const extension = path.posix.extname(audioPath).toLowerCase();
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) ||
+    !AUDIO_EXTENSIONS.has(extension) ||
+    audioPath !== meetingAudioObjectPath(session.userId, id, extension)
+  ) {
+    return Response.json({ error: "That audio upload is not valid." }, { status: 400 });
   }
-  if (file.size <= 0) {
-    return Response.json({ error: "That file is empty." }, { status: 400 });
-  }
-  if (file.size > maxUploadBytes()) {
-    return Response.json(
-      {
-        error: `That file is larger than ${Math.round(maxUploadBytes() / (1024 * 1024))} MB.`,
-      },
-      { status: 413 },
-    );
-  }
-  const extension = extensionForUpload(file.name, file.type);
-  if (!extension) {
-    return Response.json(
-      { error: "Use an audio file such as mp3, wav, m4a, webm, or ogg." },
-      { status: 400 },
-    );
-  }
-  const source = form.get("source") === "recording" ? "recording" : "upload";
-  const requestedTitle = String(form.get("title") ?? "").trim();
-  const fallback =
-    source === "recording"
-      ? `Recording ${new Date().toLocaleString()}`
-      : path.basename(file.name, path.extname(file.name)).trim() || "Untitled meeting";
+  const source = body?.source === "recording" ? "recording" : "upload";
+  const requestedTitle = String(body?.title ?? "").trim();
+  const fallback = source === "recording" ? `Recording ${new Date().toLocaleString()}` : "Untitled meeting";
   const title = (requestedTitle || fallback).slice(0, 120);
-  const id = crypto.randomUUID();
-  const audioPath = meetingAudioObjectPath(session.userId, id, extension);
-  const mime = file.type || "application/octet-stream";
-  await uploadMeetingAudio(
-    session.supabase,
-    audioPath,
-    Buffer.from(await file.arrayBuffer()),
-    mime,
-  );
+  const mime = body?.audioMime?.trim() || "application/octet-stream";
   await createMeeting(session.supabase, session.userId, {
     id,
     title,

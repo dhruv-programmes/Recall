@@ -5,6 +5,7 @@ import {
   startSpeechJob,
   type SpeechJob,
 } from "@/lib/speech/client";
+import { progressFromSpeechJob } from "@/lib/speech/progress";
 import {
   getMeeting,
   getMeetingAudioPath,
@@ -35,6 +36,7 @@ export async function beginTranscription(
     await updateMeeting(supabase, userId, meetingId, {
       status: "transcribing",
       speechJobId: job.id,
+      speechProgress: { phase: "queued", ratio: 0, processedSeconds: null, durationSeconds: null },
       startedAt: new Date().toISOString(),
       error: null,
       endedAt: null,
@@ -89,7 +91,11 @@ export async function syncMeeting(
       return meetingDetail(supabase, meetingId);
     }
     if (job.status === "queued" || job.status === "running") {
-      await updateMeeting(supabase, userId, meetingId, { status: "transcribing", error: null });
+      await updateMeeting(supabase, userId, meetingId, {
+        status: "transcribing",
+        error: null,
+        speechProgress: progressFromSpeechJob(job),
+      });
       return meetingDetail(supabase, meetingId);
     }
     if (job.status === "failed") {

@@ -15,8 +15,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ApiError, api } from "@/lib/client";
-import type { MeetingDetail } from "@/lib/types";
+import { ApiError } from "@/lib/client";
+import { saveAudioMeeting } from "@/lib/storage/save-audio";
 
 export function UploadDialog({
   onCreated,
@@ -36,20 +36,17 @@ export function UploadDialog({
     }
     setBusy(true);
     try {
-      const body = new FormData();
-      body.set("file", file);
-      body.set("source", "upload");
-      if (title.trim()) body.set("title", title.trim());
-      const detail = await api<MeetingDetail>("/api/meetings", {
-        method: "POST",
-        body,
+      const detail = await saveAudioMeeting({
+        file,
+        source: "upload",
+        title: title.trim() || file.name.replace(/\.[^.]+$/, ""),
       });
       setOpen(false);
       setFile(null);
       setTitle("");
       onCreated?.(detail.meeting.id);
       router.push(`/meetings/${detail.meeting.id}`);
-      toast.success("Audio saved. Transcription is running locally.");
+      toast.success("Audio saved. Transcription is running.");
     } catch (error) {
       toast.error(error instanceof ApiError ? error.message : "Upload failed.");
     } finally {
@@ -66,7 +63,7 @@ export function UploadDialog({
         <DialogHeader>
           <DialogTitle>Upload audio</DialogTitle>
           <DialogDescription>
-            The file stays in this app&apos;s local data folder. mp3, wav, m4a, webm, and ogg are accepted.
+            mp3, wav, m4a, webm, and ogg are accepted.
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">

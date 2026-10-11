@@ -1,9 +1,5 @@
-import fs from "node:fs";
-import path from "node:path";
-import { dataDir } from "@/lib/env";
 import type { MeetingProgress, ProgressPhase } from "@/lib/types";
-
-const JOB_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+import type { SpeechJob } from "@/lib/speech/client";
 
 function numberOrNull(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -14,31 +10,41 @@ function clampRatio(value: number | null) {
   return Math.min(1, Math.max(0, value));
 }
 
-export function readSpeechProgress(jobId: string | null): MeetingProgress | null {
-  if (!jobId || !JOB_ID.test(jobId)) return null;
-  const file = path.join(dataDir(), "speech-jobs", `${jobId}.json`);
-  try {
-    const job = JSON.parse(fs.readFileSync(file, "utf8")) as {
-      phase?: string;
-      progress?: unknown;
-      processed_seconds?: unknown;
-      duration?: unknown;
-      status?: string;
-    };
-    const phase: ProgressPhase =
-      job.phase === "queued" ||
-      job.phase === "loading" ||
-      job.phase === "diarizing" ||
-      job.phase === "transcribing"
-        ? job.phase
+export function speechProgress(value: unknown): MeetingProgress | null {
+  if (!value || typeof value !== "object") return null;
+  const job = value as {
+    phase?: unknown;
+    ratio?: unknown;
+    processedSeconds?: unknown;
+    durationSeconds?: unknown;
+  };
+  const phase: ProgressPhase =
+    job.phase === "queued" ||
+    job.phase === "loading" ||
+    job.phase === "diarizing" ||
+    job.phase === "transcribing" ||
+    job.phase === "notes"
+      ? job.phase
+      : "transcribing";
+  return {
+    phase,
+    ratio: clampRatio(numberOrNull(job.ratio)),
+    processedSeconds: numberOrNull(job.processedSeconds),
+    durationSeconds: numberOrNull(job.durationSeconds),
+  };
+}
+
+export function progressFromSpeechJob(job: SpeechJob): MeetingProgress {
+  const phase: ProgressPhase =
+    job.phase === "queued" || job.phase === "loading" || job.phase === "diarizing" || job.phase === "transcribing"
+      ? job.phase
+      : job.status === "queued"
+        ? "queued"
         : "transcribing";
-    return {
-      phase,
-      ratio: clampRatio(numberOrNull(job.progress)),
-      processedSeconds: numberOrNull(job.processed_seconds),
-      durationSeconds: numberOrNull(job.duration),
-    };
-  } catch {
-    return null;
-  }
+  return {
+    phase,
+    ratio: clampRatio(numberOrNull(job.progress)),
+    processedSeconds: numberOrNull(job.processed_seconds),
+    durationSeconds: numberOrNull(job.duration),
+  };
 }

@@ -37,8 +37,8 @@ const caslon = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "Meeting notes",
-  description: "Meeting transcripts, notes, and questions.",
+  title: "Recall",
+  description: "Record a meeting, then read the transcript, notes, and answers.",
 };
 
 export const viewport: Viewport = {

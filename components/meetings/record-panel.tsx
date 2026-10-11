@@ -7,8 +7,8 @@ import { Persona, type PersonaState } from "@/components/ai-elements/persona";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ApiError, api } from "@/lib/client";
-import type { MeetingDetail } from "@/lib/types";
+import { ApiError } from "@/lib/client";
+import { saveAudioMeeting } from "@/lib/storage/save-audio";
 
 function supportedMime() {
   if (typeof MediaRecorder === "undefined") return "";
@@ -127,13 +127,10 @@ export function RecordPanel() {
     try {
       const extension = blob.type.includes("mp4") ? "m4a" : "webm";
       const file = new File([blob], `recording.${extension}`, { type: blob.type });
-      const body = new FormData();
-      body.set("file", file);
-      body.set("source", "recording");
-      if (title.trim()) body.set("title", title.trim());
-      const detail = await api<MeetingDetail>("/api/meetings", {
-        method: "POST",
-        body,
+      const detail = await saveAudioMeeting({
+        file,
+        source: "recording",
+        title,
       });
       setStatus("idle");
       setTitle("");
@@ -154,7 +151,7 @@ export function RecordPanel() {
   return (
     <div className="reading grid gap-8">
       <div className="grid gap-3">
-        <h1 className="text-4xl leading-tight font-semibold">Meeting notes</h1>
+        <h1 className="text-4xl leading-tight font-semibold">Recall</h1>
         <p className="text-lg leading-8 text-muted-foreground">
           Record the room from here. The transcript is written after you save.
         </p>

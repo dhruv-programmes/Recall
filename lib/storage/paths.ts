@@ -1,5 +1,3 @@
-import path from "node:path";
-
 const AUDIO_EXTENSIONS = new Set([
   ".mp3",
   ".wav",
@@ -27,8 +25,14 @@ const MIME_EXTENSIONS: Record<string, string> = {
   "audio/aac": ".aac",
 };
 
+function extensionName(filename: string) {
+  const dot = filename.lastIndexOf(".");
+  if (dot <= 0) return "";
+  return filename.slice(dot).toLowerCase();
+}
+
 export function extensionForUpload(filename: string, mime: string) {
-  const fromName = path.extname(filename).toLowerCase();
+  const fromName = extensionName(filename);
   if (AUDIO_EXTENSIONS.has(fromName)) return fromName;
   const baseMime = mime.split(";")[0]?.trim().toLowerCase() ?? "";
   return MIME_EXTENSIONS[baseMime] ?? null;

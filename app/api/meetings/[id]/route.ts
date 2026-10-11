@@ -3,6 +3,8 @@ import { syncMeeting } from "@/lib/speech/sync";
 import { requireSession, unauthorized } from "@/lib/supabase/server";
 import { deleteMeeting, meetingDetail, updateMeeting } from "@/lib/storage/meetings";
 
+export const maxDuration = 60;
+
 type Context = { params: Promise<{ id: string }> };
 
 export async function GET(_request: Request, context: Context) {

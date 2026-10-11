@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { after } from "next/server";
 import { generateText, Output } from "ai";
 import { getChatModel } from "@/lib/ai/model";
 import { notesSchema } from "@/lib/schemas/notes";
@@ -32,9 +33,13 @@ export async function queueNotes(
     notesStatus: "generating",
     notesError: null,
   });
-  void generateMeetingNotes(background, userId, meetingId).finally(() =>
-    inflight.delete(meetingId),
-  );
+  after(async () => {
+    try {
+      await generateMeetingNotes(background, userId, meetingId);
+    } finally {
+      inflight.delete(meetingId);
+    }
+  });
 }
 
 function keepIds(ids: string[], known: Set<string>) {

@@ -171,7 +171,7 @@ export function MeetingShell({
                 {list}
               </SheetContent>
             </Sheet>
-            <p className="text-sm text-muted-foreground md:hidden">Meetings</p>
+            <p className="text-sm text-muted-foreground md:hidden">Recall</p>
           </div>
           <div className="flex items-center gap-2">
             <UploadDialog />
