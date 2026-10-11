@@ -4,11 +4,6 @@
     "app": {
       "root": ".",
       "framework": "nextjs"
-    },
-    "speech": {
-      "root": "services/speech",
-      "framework": "fastapi",
-      "entrypoint": "app:app"
     }
   },
   "rewrites": [
