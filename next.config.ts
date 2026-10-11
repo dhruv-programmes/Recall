@@ -1,9 +1,15 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
   cacheComponents: true,
   partialPrefetching: true,
+  serverExternalPackages: ["sarvamai"],
+  experimental: {
+    serverActions: {
+      bodySizeLimit: "200mb",
+    },
+    proxyClientMaxBodySize: "200mb",
+  },
   turbopack: {
     rules: {
       "*.css": {

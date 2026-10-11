@@ -32,6 +32,17 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+
+# local meeting data, models, and python env
+/data/
+*.db
+*.db-*
+services/speech/.venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
 
 # vercel
 .vercel

@@ -1,0 +1,3 @@
+# Optional. Requires a Hugging Face token with access to pyannote models.
+# Install only if you want speaker labels: pip install -r requirements-diarization.txt
+pyannote.audio>=3.3
